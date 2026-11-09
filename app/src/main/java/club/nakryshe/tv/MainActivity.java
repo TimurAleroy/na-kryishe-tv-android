@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     private int lastReloadDay = -1;    // в какой день уже делали ночную перезагрузку
     private TextView hint;             // подсказка на чёрном экране, пока ссылка не задана
     private boolean setupAutoShown = false;
+    private Dock dock;                 // панель плиток приложений (Okko, IVI, YouTube…)
 
     private final Runnable retry = new Runnable() {
         @Override
@@ -84,6 +85,7 @@ public class MainActivity extends Activity {
         hint.setGravity(Gravity.CENTER);
         hint.setVisibility(View.GONE);
         root.addView(hint, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        dock = new Dock(this, root);   // добавляется последней, поэтому лежит поверх страницы
         handler.postDelayed(watchdog, 60000);
     }
 
@@ -101,6 +103,9 @@ public class MainActivity extends Activity {
             return;
         }
         web.setBackgroundColor(Color.BLACK);
+        // Страница управляется только из Jarvis, пульту она не нужна: без фокуса на ней кнопки пульта достаются нашей панели плиток
+        web.setFocusable(false);
+        web.setFocusableInTouchMode(false);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -228,6 +233,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         hideSystemUi();
+        if (dock != null) dock.hide();   // вернулись из приложения или настройки: панель закрыта
         if (web != null) {
             web.onResume();
             // вернулись с экрана настройки (или первый запуск): ссылка могла поменяться
@@ -247,6 +253,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        if (dock != null) dock.hide();
         if (web != null) web.onPause();
         super.onPause();
     }
@@ -262,18 +269,43 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    private static boolean isArrow(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                || keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN;
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_MENU) {
             openSetup();
             return true;
         }
+        if (dock != null && dock.isOpen()) {
+            // Панель плиток открыта: «OK» нажимает плитку сама, стрелки влево/вправо двигают выбор. Здесь — только «убрать панель».
+            dock.poke();
+            if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                dock.hide();
+                return true;
+            }
+            return super.onKeyDown(keyCode, event);
+        }
         if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-            event.startTracking();   // долгое нажатие «OK» открывает настройку
+            event.startTracking();   // короткое «OK» показывает плитки, долгое открывает настройку
             return true;
         }
+        if (isArrow(keyCode) && dock != null && event.getRepeatCount() == 0 && dock.show()) return true;
         if (keyCode == KeyEvent.KEYCODE_BACK) return true;   // «Назад» ничего не закрывает: экран должен работать, пока кто-то не нажмёт «Домой»
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if ((keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)
+                && event.isTracking() && !event.isCanceled()) {
+            if (dock != null) dock.show();   // нет плиток — ничего не происходит, как раньше
+            return true;
+        }
+        return super.onKeyUp(keyCode, event);
     }
 
     @Override

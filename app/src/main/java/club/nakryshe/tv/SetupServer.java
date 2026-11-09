@@ -10,6 +10,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -24,6 +26,15 @@ final class SetupServer {
 
         /** Одна строка о том, что настроено сейчас (показывается на странице). */
         String status();
+
+        /** Приложения для плиток: {пакет, название, "1" если плитка сейчас включена}. Сначала включённые, в их порядке. */
+        List<String[]> apps();
+
+        /** Сохранить плитки (пакеты по порядку; пустой список — без плиток). Вернуть null — принято, иначе текст ошибки. */
+        String onTiles(List<String> packages);
+
+        /** Вернуть стандартный набор плиток. */
+        void onTilesReset();
     }
 
     private static final Charset UTF8 = Charset.forName("UTF-8");
@@ -118,6 +129,20 @@ final class SetupServer {
             String url = formValue(new String(body, 0, got, UTF8), "url");
             String err = listener.onSubmit(url);
             respond(out, 200, "text/html; charset=utf-8", err == null ? donePage() : formPage(err, url));
+        } else if ("POST".equals(method) && path.startsWith("/tiles-reset")) {
+            listener.onTilesReset();
+            respond(out, 200, "text/html; charset=utf-8", tilesDonePage("Плитки вернулись к стандартным: Okko, ivi, YouTube (те, что установлены на приставке)."));
+        } else if ("POST".equals(method) && path.startsWith("/tiles")) {
+            String csv = formValue(new String(body, 0, got, UTF8), "tiles");
+            List<String> pkgs = new ArrayList<String>();
+            for (String p : csv.split(",")) {
+                String t = p.trim();
+                if (!t.isEmpty() && !pkgs.contains(t)) pkgs.add(t);
+            }
+            String err = listener.onTiles(pkgs);
+            respond(out, 200, "text/html; charset=utf-8", err == null
+                    ? tilesDonePage(pkgs.isEmpty() ? "Плитки выключены: панель приложений не будет появляться." : "Плитки сохранены. На телевизоре они появятся при следующем нажатии кнопки пульта.")
+                    : formPage(err, ""));
         } else if ("GET".equals(method) && (path.equals("/") || path.startsWith("/?"))) {
             respond(out, 200, "text/html; charset=utf-8", formPage(null, ""));
         } else {
@@ -179,6 +204,13 @@ final class SetupServer {
             + "button{margin-top:14px;width:100%;padding:15px;border:0;border-radius:100px;background:#B87333;color:#1E1004;font-size:16px;font-weight:600}"
             + ".err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fca5a5;border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:14px;line-height:1.45}"
             + ".st{font-size:13px;color:#8A6A52;margin-bottom:16px}"
+            + "h2{font-size:15px;letter-spacing:3px;text-transform:uppercase;color:#B87333;font-weight:500;margin:34px 0 10px}"
+            + "ul.ap{list-style:none;margin:12px 0 0;padding:0}"
+            + "ul.ap li{display:flex;align-items:center;justify-content:space-between;background:#20120A;border:1px solid rgba(184,115,51,.25);border-radius:12px;padding:10px 12px;margin-bottom:8px}"
+            + "ul.ap label{display:flex;align-items:center;gap:10px;flex:1;font-size:16px;color:#F0DFC0}"
+            + "ul.ap input{width:20px;height:20px;accent-color:#B87333}"
+            + "ul.ap .mv button{width:auto;margin:0 0 0 6px;padding:6px 14px;border-radius:10px;background:#2A160F;color:#C9A880;font-size:15px;font-weight:400;border:1px solid rgba(184,115,51,.4)}"
+            + "button.sec{background:transparent;color:#C9A880;border:1px solid rgba(184,115,51,.45);margin-top:10px}"
             + "</style>";
 
     private String formPage(String error, String value) {
@@ -189,7 +221,48 @@ final class SetupServer {
                 + (error == null ? "" : "<div class=\"err\">" + esc(error) + "</div>")
                 + "<p>Вставьте сюда ссылку комнаты из Jarvis («Сервис → ТВ-экраны» → выбрать комнату → «Скопировать») и нажмите «Сохранить».</p>"
                 + "<form method=\"post\" action=\"/save\"><textarea name=\"url\" placeholder=\"https://…/?room=1&amp;key=…\" autocomplete=\"off\" autocapitalize=\"off\" spellcheck=\"false\">"
-                + esc(value) + "</textarea><button type=\"submit\">Сохранить</button></form></div></body></html>";
+                + esc(value) + "</textarea><button type=\"submit\">Сохранить</button></form>"
+                + tilesSection() + "</div></body></html>";
+    }
+
+    /** Список приложений приставки: галочка включает плитку, стрелки меняют порядок (слева направо на экране). */
+    private String tilesSection() {
+        StringBuilder b = new StringBuilder();
+        b.append("<h2>Плитки приложений</h2>");
+        b.append("<p>Кнопки внизу экрана: появляются по любой кнопке пульта. Отметьте приложения (не больше 8) и расставьте стрелками по порядку слева направо.</p>");
+        List<String[]> apps = listener.apps();
+        if (apps == null || apps.isEmpty()) {
+            b.append("<p>Не нашёл на приставке приложений, которые можно открыть с пульта.</p>");
+            return b.toString();
+        }
+        b.append("<ul class=\"ap\" id=\"ap\">");
+        for (String[] a : apps) {
+            if (a == null || a.length < 3) continue;
+            b.append("<li data-p=\"").append(esc(a[0])).append("\"><label><input type=\"checkbox\"")
+                    .append("1".equals(a[2]) ? " checked" : "").append("> ").append(esc(a[1])).append("</label>")
+                    .append("<span class=\"mv\"><button type=\"button\" onclick=\"mv(this,-1)\">▲</button>")
+                    .append("<button type=\"button\" onclick=\"mv(this,1)\">▼</button></span></li>");
+        }
+        b.append("</ul>");
+        b.append("<form method=\"post\" action=\"/tiles\" onsubmit=\"return pack()\">")
+                .append("<input type=\"hidden\" name=\"tiles\" id=\"tl\"><button type=\"submit\">Сохранить плитки</button></form>");
+        b.append("<form method=\"post\" action=\"/tiles-reset\"><button type=\"submit\" class=\"sec\">Вернуть стандартные (Okko, ivi, YouTube)</button></form>");
+        b.append("<script>"
+                + "function mv(b,d){var li=b.parentNode.parentNode,ul=li.parentNode;"
+                + "if(d<0&&li.previousElementSibling)ul.insertBefore(li,li.previousElementSibling);"
+                + "if(d>0&&li.nextElementSibling)ul.insertBefore(li.nextElementSibling,li);}"
+                + "function pack(){var r=[],l=document.querySelectorAll('#ap li');"
+                + "for(var i=0;i<l.length;i++){if(l[i].querySelector('input').checked)r.push(l[i].getAttribute('data-p'));}"
+                + "document.getElementById('tl').value=r.join(',');return true;}"
+                + "</script>");
+        return b.toString();
+    }
+
+    private static String tilesDonePage(String message) {
+        return "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
+                + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Готово</title>" + STYLE
+                + "</head><body><div class=\"w\"><h1>Готово</h1><p>" + esc(message) + "</p>"
+                + "<p><a href=\"/\" style=\"color:#B87333\">Назад к настройке</a></p></div></body></html>";
     }
 
     private static String donePage() {

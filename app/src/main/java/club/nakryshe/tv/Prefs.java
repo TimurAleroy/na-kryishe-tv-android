@@ -1,23 +1,49 @@
 package club.nakryshe.tv;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Единственная настройка приложения — ссылка комнаты из Jarvis (Сервис → ТВ-экраны → «Скопировать»). */
+/**
+ * Настройки приложения: ссылка комнаты из Jarvis (Сервис → ТВ-экраны → «Скопировать») и список плиток приложений.
+ */
 final class Prefs {
     private static final String FILE = "nktv";
     private static final String KEY_URL = "url";
+    private static final String KEY_TILES = "tiles";
 
     private Prefs() {}
 
+    private static SharedPreferences sp(Context c) {
+        return c.getSharedPreferences(FILE, Context.MODE_PRIVATE);
+    }
+
     static String getUrl(Context c) {
-        return c.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString(KEY_URL, "");
+        return sp(c).getString(KEY_URL, "");
     }
 
     static void setUrl(Context c, String url) {
-        c.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(KEY_URL, url).apply();
+        sp(c).edit().putString(KEY_URL, url).apply();
+    }
+
+    /**
+     * Плитки приложений: имена пакетов по порядку через запятую.
+     * null — не настраивалось (показываем стандартный набор), пустая строка — плиток нет совсем.
+     */
+    static String getTiles(Context c) {
+        SharedPreferences p = sp(c);
+        return p.contains(KEY_TILES) ? p.getString(KEY_TILES, "") : null;
+    }
+
+    static void setTiles(Context c, String csv) {
+        sp(c).edit().putString(KEY_TILES, csv == null ? "" : csv).apply();
+    }
+
+    /** Вернуть стандартный набор плиток. */
+    static void resetTiles(Context c) {
+        sp(c).edit().remove(KEY_TILES).apply();
     }
 
     /**

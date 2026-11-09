@@ -42,7 +42,7 @@ public class SetupActivity extends Activity {
     private static final int BG = 0xFF1E1004, TEXT = 0xFFF0DFC0, SUB = 0xFFC9A880, MUTED = 0xFF8A6A52, ACCENT = 0xFFB87333;
 
     private SetupServer server;
-    private TextView statusView, addrView, autoInfo;
+    private TextView statusView, addrView, autoInfo, tilesInfo;
     private EditText input;
     private Button autoBtn;
 
@@ -130,6 +130,20 @@ public class SetupActivity extends Activity {
         row.addView(closeBtn, rowParams());
         col.addView(row);
 
+        TextView tilesTitle = text("Плитки приложений", 20, TEXT);
+        tilesTitle.setPadding(0, dp(30), 0, dp(6));
+        col.addView(tilesTitle);
+
+        TextView tilesHelp = text("Кнопки Okko, ivi, YouTube и других приложений внизу экрана. Они появляются по любой кнопке пульта (стрелки или «OK»), "
+                + "выбор — стрелками влево и вправо, «OK» открывает приложение, «Назад» убирает панель. "
+                + "Какие приложения показывать и в каком порядке — на той же странице с телефона, ниже ссылки.", 16, SUB);
+        tilesHelp.setPadding(0, 0, 0, dp(6));
+        col.addView(tilesHelp);
+
+        tilesInfo = text("", 16, MUTED);
+        tilesInfo.setPadding(0, 0, 0, dp(4));
+        col.addView(tilesInfo);
+
         TextView sep = text("Автозапуск и системные настройки", 20, TEXT);
         sep.setPadding(0, dp(30), 0, dp(6));
         col.addView(sep);
@@ -214,6 +228,49 @@ public class SetupActivity extends Activity {
             public String status() {
                 return describe();
             }
+
+            @Override
+            public List<String[]> apps() {
+                List<Tiles.App> all = Tiles.installed(SetupActivity.this);
+                List<Tiles.App> sel = Tiles.selected(SetupActivity.this);
+                List<String[]> out = new ArrayList<String[]>();
+                for (Tiles.App a : sel) out.add(new String[]{a.pkg, a.label, "1"});
+                for (Tiles.App a : all) {
+                    if (!hasPkg(sel, a.pkg)) out.add(new String[]{a.pkg, a.label, "0"});
+                }
+                return out;
+            }
+
+            @Override
+            public String onTiles(List<String> packages) {
+                if (packages.size() > Tiles.MAX) return "Можно не больше " + Tiles.MAX + " плиток.";
+                List<Tiles.App> all = Tiles.installed(SetupActivity.this);
+                StringBuilder b = new StringBuilder();
+                for (String p : packages) {
+                    if (!hasPkg(all, p)) return "Такого приложения нет на приставке: " + p;
+                    if (b.length() > 0) b.append(",");
+                    b.append(p);
+                }
+                Prefs.setTiles(SetupActivity.this, b.toString());
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        refresh();
+                    }
+                });
+                return null;
+            }
+
+            @Override
+            public void onTilesReset() {
+                Prefs.resetTiles(SetupActivity.this);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        refresh();
+                    }
+                });
+            }
         });
         try {
             s.start();
@@ -233,6 +290,21 @@ public class SetupActivity extends Activity {
         Prefs.setUrl(this, clean);
         Toast.makeText(this, "Ссылка сохранена", Toast.LENGTH_SHORT).show();
         finish();
+    }
+
+    private static boolean hasPkg(List<Tiles.App> list, String pkg) {
+        for (Tiles.App a : list) {
+            if (a.pkg.equals(pkg)) return true;
+        }
+        return false;
+    }
+
+    private String tilesLine() {
+        List<Tiles.App> sel = Tiles.selected(this);
+        if (sel.isEmpty()) {
+            return "Сейчас плиток нет: нужных приложений нет на приставке или плитки выключены. Выбрать приложения можно на странице с телефона.";
+        }
+        return "Сейчас: " + Tiles.names(sel) + ".";
     }
 
     private String describe() {
@@ -255,6 +327,7 @@ public class SetupActivity extends Activity {
             }
             addrView.setText(b.toString());
         }
+        tilesInfo.setText(tilesLine());
         boolean can = canOverlay();
         autoInfo.setText(can
                 ? "Автозапуск разрешён: после включения приставки экран откроется сам."
